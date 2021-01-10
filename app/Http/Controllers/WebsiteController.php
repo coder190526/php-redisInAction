@@ -6,13 +6,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redis;
 use App\Http\Controllers\LockController;
 use App\Http\Controllers\QueueController;
-use App\Http\Controllers\LogController;
 
 class WebsiteController extends Controller
 {
     public function getUserList(){
         $data=['userList'=>Redis::hgetall('users:'),'success'=>true];
-        LogController::logRecent('refresh','demo8.website');
         return response()->json($data)->setEncodingOptions(JSON_UNESCAPED_UNICODE);
     }
 
@@ -63,7 +61,6 @@ class WebsiteController extends Controller
             'userList'=>Redis::hgetall('users:'),
             'success'=>true
         ];
-        LogController::logRecent('refresh','demo8.website');
         return response()->json(['allData'=>$data,'success'=>true])->setEncodingOptions(JSON_UNESCAPED_UNICODE);
     }
 

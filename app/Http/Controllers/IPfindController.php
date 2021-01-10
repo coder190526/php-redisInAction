@@ -7,86 +7,119 @@ use Illuminate\Support\Facades\Redis;
 
 class IPfindController extends Controller
 {
-    public function ipsToRedis(Request $req){
-        $filename=$req->input('filename');
-        $this->import_ips_to_redis($filename);
-        return ['msg'=>'导入成功','success'=>true];
-    }
+    // public function ipsToRedis(Request $req){
+    //     $filename=$req->input('filename');
+    //     $this->import_ips_to_redis($filename);
+    //     return ['msg'=>'导入成功','success'=>true];
+    // }
 
     public function citiesToRedis(Request $req){
         $filename=$req->input('filename');
+        if (!is_file($filename) && !file_exists($filename)) {
+            return ['msg'=>'文件错误','success'=>false];
+        }
         $this->import_cities_to_redis($filename);
-        return ['msg'=>'导入成功','success'=>true];
+        return ['success'=>true];
     }
 
     public function findCity(Request $req){
-        $ip=$req->input('ip');
-        $data=$this->find_city_by_ip($ip);
+        $id=$req->input('id');
+        $data=$this->find_city_by_id($id);
         if($data){
-            ['city'=>$data,'success'=>true];
+            return ['city'=>$data,'success'=>true];
         }else{
-            ['msg'=>'查询失败','success'=>false];
+            return ['msg'=>'没有找到对应城市','success'=>false];
         }
     }
 
-    public function import_ips_to_redis($filename){
-        $csv_file=[];
-        if($handle=fopen($filename,'rb')!==false){
-            while(!feof($handle) && $data=fgetcsv($handle)!==false){
-                array_push($csv_file,$data);
-            }
-            fclose($handle);
+    public function delFile(){
+        if(__DIR__){
+            $path=array_slice(explode('\\',__DIR__),0,-3);
+            $path=implode('\\',$path);
+            $path.='\public\China-City-Locations.csv';
         }
-        foreach($csv_file as $count=>$row){
-            $start_ip=$row?$row[0]:'';
-            if(strpos(strtolower($start_ip),'i')!==false){
-                continue;
-            }
-            if(strpos(($start_ip),'.')!==false){
-                $start_ip=ip_to_score($start_ip);
-            }elseif(is_numeric($start_ip)){
-                $start_ip=(int)$start_ip;
-            }else{
-                continue;
-            }
-            $city_id=$row[2].'_'.strval($count);
+        if(Redis::exists('cityid2city:')){
+            Redis::del('cityid2city:');
+            return ['msg'=>'文件删除成功','path'=>$path,'success'=>true];
+        }else{
+            return  ['msg'=>'文件已被删除,请重新导入','path'=>$path,'success'=>false];
         }
-        Redis::zadd('ip2cityid:',$start_ip,$city_id);
     }
+
+    public function getCityList(){
+        if(__DIR__){
+            $path=array_slice(explode('\\',__DIR__),0,-3);
+            $path=implode('\\',$path);
+            $path.='\public\China-City-Locations.csv';
+        }
+        if(!Redis::exists('cityid2city:')){
+            return ['msg'=>'数据还未导入','path'=>$path,'success'=>false];
+        }
+        $list=Redis::hgetall('cityid2city:');
+        $list=array_slice($list,0,20);
+        if($list){
+            foreach($list as $v){
+                $v=json_decode($v);
+                $data[]=['info'=>$v];
+            }
+            return ['list'=>$data,'success'=>true];
+        }else{
+            return ['msg'=>'获取列表失败','success'=>false];
+        }
+    }
+
+    // public function import_ips_to_redis($filename){
+    //     $csv_file=[];
+    //     if(($handle=fopen($filename,'rb'))!==false){
+    //         while(!feof($handle) && $data=fgetcsv($handle)!==false){
+    //             array_push($csv_file,$data);
+    //         }
+    //         fclose($handle);
+    //     }
+    //     foreach($csv_file as $count=>$row){
+    //         $start_ip=$row[0] ?? '';
+    //         if(strpos(strtolower($start_ip),'i')!==false){
+    //             continue;
+    //         }
+    //         if(strpos(($start_ip),'.')!==false){
+    //             $start_ip=$this->ip_to_score($start_ip);
+    //         }elseif(is_numeric($start_ip)){
+    //             $start_ip=(int)$start_ip;
+    //         }else{
+    //             continue;
+    //         }
+    //         $city_id=$row[2].'_'.strval($count);
+    //         Redis::zadd('ip2cityid:',$start_ip,$city_id);
+    //     }
+    // }
 
     public function import_cities_to_redis($filename){
         $csv_file=[];
-        if($handle=fopen($filename,'rb')!==false){
-            while(!feof($handle) && $data=fgetcsv($handle)!==false){
+        if(($handle=fopen($filename,'rb'))!==false){
+            while(!feof($handle) && ($data=fgetcsv($handle))!==false){
                 array_push($csv_file,$data);
             }
             fclose($handle);
         }
         foreach($csv_file as $row){
-            if(count($row)<4 || !is_numeric($row[0])){
+            $row = eval('return '.iconv('gbk','utf-8',var_export($row,true)).';');
+            if(!is_numeric($row[0])){
                 continue;
             }
-            $row=array_map(function($val){
-                return $val;
-            },$row);
             $city_id=$row[0];
-            $country=$row[1];
-            $region=$row[2];
-            $city=$row[3];
-            Redis::hset('cityid2city:',$city_id,json_encode([$city,$region,$country]));
+            $province_code=$row[6];
+            $province_name=$row[7];
+            $city_name=$row[10];
+            Redis::hset('cityid2city:',$city_id,json_encode(['id'=>$city_id,'city_name'=>$city_name,'province_code'=>$province_code,'province_name'=>$province_name],JSON_UNESCAPED_UNICODE));
         }
     }
 
-    public function find_city_by_ip($ip_address){
-        if(is_string($ip_address)){
-            $ip_address=$this->ip_to_score($ip_address);
-        }
-        $city_id=Redis::zrevrangebyscore('ip2cityid',$ip_address,0,['limit'=>[0,1]]);
-        if(!$city_id){
+    public function find_city_by_id($city_id){
+        $data=Redis::hget('cityid2city:',$city_id);
+        if(!$data){
             return null;
         }
-        $city_id=str_split($city_id[0],'_')[0];
-        return json.decode(Redis::hget('cityid2city:',$city_id));
+        return json_decode(Redis::hget('cityid2city:',$city_id));
     }
 
     public function ip_to_score($ip_address){   
@@ -97,6 +130,7 @@ class IPfindController extends Controller
         return $score;
     }
 
+    //系统配置
     public function is_under_maintenance(){
         $LAST_CHECKED=null;
         $IS_UNDER_MAINTENACE=false;

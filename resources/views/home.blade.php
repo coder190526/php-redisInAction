@@ -33,7 +33,7 @@
                         <a href="/stats">统计数据</a>
                     </li>
                     <li>
-                        <a href="/ipfind">查找IP所属城市</a>
+                        <a href="/ipfind">查找ID所属城市</a>
                     </li>
                 </ul>
             </li>
@@ -43,11 +43,17 @@
                     <li>
                         <a href="/contact">自动补全</a>
                     </li>
+                    <li>
+                        <a href="/chat">群组消息系统</a>
+                    </li>
                 </ul>
             </li>
             <li>
                 <h4>第七章</h4>
                 <ul>
+                    <li>
+                        <a href="/docSearch">文档搜索</a>
+                    </li>
                     <li>
                         <a href="/adtarget">广告定向</a>
                     </li>

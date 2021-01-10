@@ -20,10 +20,11 @@ class LogController extends Controller
         $severity=$req->input('severity') ?: 'logging.INFO';
         $severity=strtolower(strval(self::SEVERITY[$severity] ?: $severity));
         $list=Redis::lrange('recent:'.$name.':'.$severity,0,-1);
+        $count=Redis::llen('recent:'.$name.':'.$severity);
         $data=array_map(function($v)use($name,$severity){
             return ['name'=>$name,'severity'=>$severity,'log'=>$v];
         },$list);
-        return response()->json(['list'=>$data,'success'=>true])->setEncodingOptions(JSON_UNESCAPED_UNICODE);
+        return response()->json(['list'=>$data,'count'=>$count,'success'=>true])->setEncodingOptions(JSON_UNESCAPED_UNICODE);
     }
 
     public function getCommonLogList(Request $req){
@@ -31,19 +32,23 @@ class LogController extends Controller
         $severity=$req->input('severity') ?: 'logging.INFO';
         $severity=strtolower(strval(self::SEVERITY[$severity] ?: $severity));
         $list=Redis::lrange('common:'.$name.':'.$severity,0,-1);
+        $count=Redis::llen('common:'.$name.':'.$severity);
         $data=array_map(function($v){
             return ['name'=>$name,'severity'=>$severity,'log'=>$v];
         },$list);
-        return response()->json(['list'=>$data,'success'=>true])->setEncodingOptions(JSON_UNESCAPED_UNICODE);
+        return response()->json(['list'=>$data,'count'=>$count,'success'=>true])->setEncodingOptions(JSON_UNESCAPED_UNICODE);
     }
 
-    public static function logRecent($name,$message){
+    public static function logRecent(Request $req){
+        $name=$req->input('name');
+        $message=$req->input('message');
         self::log_recent($name,$message);
     }
 
     public static function log_recent($name,$message,$severity='logging.INFO'){
         $severity=strtolower(strval(self::SEVERITY[$severity] ?: $severity));
         $destination = 'recent:'.$name.':'.$severity;
+        date_default_timezone_set('Etc/GMT-8');
         $message=date("Y-m-d H:i:s").' '.$message;
         Redis::pipeline(function($pipe)use($destination,$message){
             $pipe->lpush($destination,$message);

@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redis;
-use App\Http\Controllers\LogController;
 
 class ShopController extends Controller
 {
@@ -20,7 +19,6 @@ class ShopController extends Controller
             ['info'=>Redis::hgetall('users:17'),'inventory'=>Redis::smembers('inventory:17')],
             ['info'=>Redis::hgetall('users:27'),'inventory'=>Redis::smembers('inventory:27')]
         ];
-        LogController::logRecent('refresh','demo4.shop');
         return response()->json($data)->setEncodingOptions(JSON_UNESCAPED_UNICODE);
     }
 
@@ -57,7 +55,6 @@ class ShopController extends Controller
             ['info'=>Redis::hgetall('users:27'),'inventory'=>Redis::smembers('inventory:27')]
         ];
         $data=['success'=>true,'user'=>$userArr,'market'=>Redis::zrange('market:',0,-1,'withscores')];
-        LogController::logRecent('refresh','demo4.shop');
         return response()->json($data)->setEncodingOptions(JSON_UNESCAPED_UNICODE);
     }
 

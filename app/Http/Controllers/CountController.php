@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redis;
-use App\Http\Controllers\LogController;
 
 class CountController extends Controller
 {
@@ -14,7 +13,6 @@ class CountController extends Controller
     public function updateCounter(Request $req){
         $name=$req->input('name');
         $this->update_counter($name);
-        LogController::logRecent('click','demo5.count');
         return ['success'=>true];
     }
 

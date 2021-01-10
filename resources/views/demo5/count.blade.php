@@ -106,12 +106,25 @@
                         .then(res=>{
                             if(res.data&&res.data.success){
                                 this.getCounter(name,this.prec);
+                                this.logRecent('count_click','点击类计数器次数更新');
                             }
                         })
                         .catch(err=>{
                             console.log(err);
                         })
-                    }
+                    },
+                    logRecent:function(name,message){
+                        axios.post('/log/logRecent',{
+                            name:name,
+                            message:message
+                        })
+                        .then(res=>{
+                            
+                        })
+                        .catch(err=>{
+                            console.log(err);
+                        })
+                    },
                 },
                 created:function(){
                     this.getCounter('click',1);

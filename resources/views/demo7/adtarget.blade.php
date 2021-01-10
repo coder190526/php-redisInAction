@@ -7,7 +7,7 @@
         <script src="{{URL::asset('js/vue.js')}}"></script>
         <script src="{{URL::asset('js/axios.min.js')}}"></script>
         <style>
-            h4{
+            h4,p{
                 margin: 0;
             }
             ul{
@@ -22,6 +22,21 @@
                 flex: 1;
                 border: 1px solid #000;
             }
+            .select{
+                float: right;
+            }
+            .click_block{
+                width: 200px;
+                height: 100px;
+                background: #999;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+            }
+            .msg{
+                font-weight: bold;
+            }
         </style>
     </head>
     <body>
@@ -30,41 +45,27 @@
                 <a href="/">返回首页</a>
             </div>
             <div class='main'>
-                <div class="contact_list">
-                    <span>
-                        <span>你的姓名@{{user}}</span>
-                        <input type="text" v-model='prefix' @keyup='fetchAutocompleteList(prefix)' placeholder="请输入联系人"/>
-                        <button @click='addUpdateContact(prefix)'>确认</button>
-                        <span v-show='msg'>消息:@{{msg}}</span>
-                    </span>
-                    <h4>最近联系人</h4>
-                    <div class="list">
-                        <ul v-show='contactList.length>0'>
-                            <li v-for="item in contactList">
-                                <span>联系人 : @{{item}}</span>
-                                <button @click='removeContact(item)'>删除</button>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="guild_list">
-                    <select class="select" v-model='guild' @change='autocompleteOnPrefix(memberName)'>
-                        <option v-for='item in guildArr' :value='item'>当前公会 : @{{item}}</option>
+                <div class="ad_create">
+                    <select class="select" v-model='city' @change='targetAds(city,content)'>
+                        <option v-for='item in citys' :value='item.val'>@{{item.text}}</option>
                     </select>
-                    <span>
-                        <input type="text" v-model='memberName' @keyup='autocompleteOnPrefix(memberName)' placeholder="请输入成员姓名"/>
-                        <button @click='joinGuild(memberName)'>加入公会</button>
-                        <span v-show='g_msg'>消息:@{{g_msg}}</span>
-                    </span>
-                    <h4>公会成员列表</h4>
-                    <div class="list">
-                        <ul v-show='guildList.length>0'>
-                            <li v-for="item in guildList">
-                                <span>成员姓名 : @{{item}}</span>
-                                <button @click='leaveGuild(item)'>退出公会</button>
-                            </li>
-                        </ul>
+                    <select class="select" v-model='type' @change='targetAds(city,content)'>
+                        <option v-for='item in types' :value='item.val'>@{{item.text}}</option>
+                    </select>
+                    <h4>广告生成</h4>
+                    <div class="inputArea">
+                        <input type="text" v-model='content' placeholder="请输入广告相关内容"/>
+                        <input type="text" v-model='value' placeholder="请输入广告价格"/>
+                        <button @click='createAd(city,content,type,value)'>生成广告</button>
+                        <button @click='targetAds(city,content)'>投放广告</button>
                     </div>
+                    <p>广告索引规则:只能根据两位字母以上的单词进行索引生成</p>
+                    <p v-show='msg' class='msg'>提示:@{{msg}}</p>
+                </div>
+                <div class="ad_area">
+                    <button v-show="showType==1" style="height: 50px" @click='recordClick'>广告点击按钮</button>
+                    <div v-show="showType==2" class="click_block" @click='recordClick'><span>广告点击区域</span></div>
+                    <a v-show="showType==3" href="javascript:void(0)" @click='recordClick'>广告链接</a>
                 </div>
             </div>
         </div>
@@ -72,25 +73,99 @@
             let app = new Vue({
                 el: '#app',
                 data:{
-                    
+                    city:'beijing',
+                    citys:[
+                        {text:'北京',val:'beijing'},
+                        {text:'上海',val:'shanghai'},
+                        {text:'广州',val:'guangzhou'},
+                        {text:'深圳',val:'shenzhen'}
+                    ],
+                    content:'',
+                    types:[
+                        {text:'点击类型',val:'cpc'},
+                        {text:'执行类型',val:'cpa'},
+                        {text:'浏览类型',val:'cpm'}
+                    ],
+                    type:'cpc',
+                    showType:'',
+                    value:0.4,
+                    msg:'',
+                    ids:[]
                 },
                 methods:{
-                    fetchAutocompleteList:function(prefix){
-                        if(!prefix.trim()){
-                            this.contactList=[];
+                    createAd:function(locations,content,type,value){
+                        if(!/[a-zA-Z]{2,}/.test(content)){
+                            this.msg='请输入至少两位连续字母';
                             return;
                         }
-                        axios.post('/contact/fetchAutocompleteList',{
-                            user:this.user,
-                            prefix:prefix
+                        if(!/^([1-9]+)|(\d+\.[1-9]+)$/.test(value)){
+                            this.msg='只能输入非负数';
+                            return;
+                        }
+                        this.msg='';
+                        axios.post('/adtarget/createAd',{
+                            locations:[locations],
+                            content:content,
+                            type:type,
+                            value:value
                         })
                         .then(res=>{
                             if(res.data&&res.data.success){
-                                this.contactList=res.data.list;
-                            }else{
-                                this.msg=res.data.msg;
-                                this.contactList=[];
+                                this.msg='广告生成成功';
                             }
+                        })
+                        .catch(err=>{
+                            console.log(err);
+                        })
+                    },
+                    targetAds:function(locations,content){
+                        if(!/[a-zA-Z]{2,}/.test(content)){
+                            this.msg='请输入至少两位连续字母';
+                            return;
+                        }
+                        this.msg='';
+                        axios.post('/adtarget/targetAds',{
+                            locations:[locations],
+                            content:content
+                        })
+                        .then(res=>{
+                            if(res.data&&res.data.success){
+                                if(res.data.ids && !res.data.ids['ad_id']){
+                                    this.msg='暂未相关广告可以投放';
+                                }else{
+                                    this.ids=res.data.ids;
+                                    this.msg='广告定向投放成功';
+                                    this.showType=Math.ceil(Math.random()*3);
+                                    this.logRecent('ad_target','广告投放id:'+this.ids['target_id']+'---广告id:'+this.ids['ad_id']);
+                                }
+                            }
+                        })
+                        .catch(err=>{
+                            console.log(err);
+                        })
+                    },
+                    recordClick:function(){
+                        axios.post('/adtarget/recordClick',{
+                            target_id:this.ids['target_id'],
+                            ad_id:this.ids['ad_id']
+                        })
+                        .then(res=>{
+                            if(res.data&&res.data.success){
+                                this.msg='点击广告成功';
+                                this.logRecent('ad_click','广告投放id:'+this.ids['target_id']+'---广告id:'+this.ids['ad_id']);
+                            }
+                        })
+                        .catch(err=>{
+                            console.log(err);
+                        })
+                    },
+                    logRecent:function(name,message){
+                        axios.post('/log/logRecent',{
+                            name:name,
+                            message:message
+                        })
+                        .then(res=>{
+                            
                         })
                         .catch(err=>{
                             console.log(err);

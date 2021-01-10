@@ -22,7 +22,7 @@ class QueueController extends Controller
     public static function process_sold_email_queue(){
         $QUIT=false;
         while(!$QUIT){
-            $packed=Redis::blpop(['queue:email'],30);
+            $packed=Redis::blpop('queue:email',30);
             if(!$packed){
                 continue;
             }
@@ -42,7 +42,7 @@ class QueueController extends Controller
             if(!$packed){
                 continue;
             }
-            list($name,$args)=json.decode($packed[1]);
+            list($name,$args)=json_decode($packed[1]);
             if(!in_array($name,$callbacks)){
                 error_log('Unknown callback');
                 continue;
@@ -53,7 +53,7 @@ class QueueController extends Controller
 
     public static function execute_later($queue,$name,$args,$delay=0){
         $identifier = strval(self::uuid());
-        $item=json.encode([$identifier,$queue,$name,$args]);
+        $item=json_encode([$identifier,$queue,$name,$args]);
         if($delay>0){
             Redis::zadd('delayed:',time()+$delay,$item);
         }else{
@@ -71,7 +71,7 @@ class QueueController extends Controller
                 continue;
             }
             $item=$item[0][0];
-            list($identifier,$queue,$function,$args)=json.decode($item);
+            list($identifier,$queue,$function,$args)=json_decode($item);
 
             $locked=LockController::acquire_lock($identifier);
             if(!$locked){

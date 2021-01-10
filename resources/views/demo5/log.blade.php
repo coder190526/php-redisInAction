@@ -15,11 +15,7 @@
                 margin: 0;
                 padding: 0;
             }
-            .main{
-                display: flex;
-            }
             .main>div{
-                flex: 1;
                 border: 1px solid #000;
             }
             .main .list li{
@@ -28,6 +24,9 @@
             }
             .main .select{
                 float: right;
+            }
+            .recent_list{
+                margin-bottom: 30px;
             }
         </style>
     </head>
@@ -41,7 +40,7 @@
                     <select class="select" v-model='r_logtype' @change='getRecentLogList'>
                         <option v-for='item in logType' :value='item.type'>@{{item.val}}</option>
                     </select>
-                    <h4>近期日志列表</h4>
+                    <h4>近期日志列表(@{{r_count}}条)</h4>
                     <div class="list">
                         <ul>
                             <li v-for="item in r_logList">
@@ -56,7 +55,7 @@
                     <select class="select" v-model='c_logtype' @change='getCommonLogList'>
                         <option v-for='item in logType' :value='item.type'>@{{item.val}}</option>
                     </select>
-                    <h4>常见日志列表</h4>
+                    <h4>常见日志列表(@{{c_count}}条)</h4>
                     <div class="list">
                         <ul>
                             <li v-for="item in c_logList">
@@ -75,12 +74,15 @@
                 data:{
                     r_logList:[],
                     c_logList:[],
+                    r_count:0,
+                    c_count:0,
                     logType:[
-                        {type:'refresh',val:'刷新'},
-                        {type:'click',val:'点击'}
+                        {type:'ad_click',val:'广告点击'},
+                        {type:'ad_target',val:'广告投放'},
+                        {type:'count_click',val:'计数器点击'}
                     ],
-                    r_logtype:'refresh',
-                    c_logtype:'refresh',
+                    r_logtype:'ad_click',
+                    c_logtype:'ad_click',
                     loading:false
                 },
                 methods:{
@@ -91,6 +93,7 @@
                         .then(res=>{
                             if(res.data&&res.data.success){
                                 this.r_logList = res.data.list;
+                                this.r_count=res.data.count;
                                 this.loading=true;
                             }
                         })
@@ -105,6 +108,7 @@
                         .then(res=>{
                             if(res.data&&res.data.success){
                                 this.c_logList = res.data.list;
+                                this.c_count=res.data.count;
                                 this.loading=true;
                             }
                         })

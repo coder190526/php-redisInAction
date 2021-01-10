@@ -7,7 +7,6 @@ use Illuminate\Support\Facades\Redis;
 
 class SearchController extends Controller
 {
-    //array_unique(explode('',$STOP_WORDS))
     const STOP_WORDS= <<<EOF
         able about across after all almost also am among an and any are as at be because been but by can cannot
         could dear did do does either else ever every for from get got had has have he her hers him his how however
@@ -26,15 +25,47 @@ EOF;
 
     public function tokenize($content){
         $words=[];
-        preg_match_all("/[a-z']{2,}/",strtolower($content),$pregArr);
-        foreach($pregArr[0] as $match){
+        preg_match_all("/[a-z']{2,}/",strtolower($content),$matchArr);
+        foreach($matchArr[0] as $match){
             $word=trim($match,"'");
             if(strlen($word) >= 2){
                 array_push($words,$word);
                 $words=array_unique($words);
             }
         }
-        return array_diff($words,array_unique(str_split($STOP_WORDS)));
+        $pregArr=preg_split('/\s+/',self::STOP_WORDS);
+        return array_diff($words,array_splice($pregArr,1));
+    }
+
+    public function createDoc(Request $req){
+        $id=strval($this->uuid());
+        $content=$req->input('content');
+        $data=$this->index_document($id,$content);
+        if($data){
+            return ['msg'=>'成功创建'.$data.'条文章索引','success'=>true];
+        }else{
+            return ['msg'=>'未能创建索引,请多输入几个单词','success'=>false];
+        }
+    }
+
+    public function searchAndSort(Request $req){
+        $query=$req->input('query');
+        list($num,$list,$id)=$this->search_and_sort($query);
+        if($num){
+            return ['msg'=>'共找到'.$num.'条结果','list'=>$list,'search_id'=>$id,'success'=>true];
+        }else{
+            return ['msg'=>'未能找到匹配结果','success'=>false];
+        }
+    }
+
+    public function searchAndZsort(Request $req){
+        $query=$req->input('query');
+        list($num,$list,$id)=$this->search_and_zsort($query);
+        if($num){
+            return ['list'=>$list,'success'=>true];
+        }else{
+            return ['msg'=>'未能找到匹配结果','success'=>false];
+        }
     }
 
     public function index_document($docid,$content){
@@ -49,32 +80,33 @@ EOF;
 
     public function _set_common($method,$names,$ttl=30,$execute=true){
         $id=strval($this->uuid());
+        $names=array_map(function($v){return 'idx:'.$v;},$names);
         if($execute){
-            $names=array_map(function($v){return 'idx:'.$v;},$names);
-            if($execute){
-                Redis::pipeline(function($pipe)use($id,$names,$ttl){
-                    $pipe->$method('idx:'.$id,...$names);
-                    $pipe->expire('idx:'.$id,$ttl);
-                });
-            }
-            return $id;
+            Redis::transaction(function($redis)use($id,$method,$names,$ttl){
+                $redis->$method('idx:'.$id,...$names);
+                $redis->expire('idx:'.$id,$ttl);
+            });
+        }else{
+            Redis::$method('idx:'.$id,...$names);
+            Redis::expire('idx:'.$id,$ttl);
         }
+        return $id;
     }
 
     public function intersect($items,$ttl=30,$_execute=true){
-        return _set_common('sinterstore',$items,$ttl,$_execute);
+        return $this->_set_common('sinterstore',$items,$ttl,$_execute);
     }
 
     public function union($items,$ttl=30,$_execute=true){
-        return _set_common('sunionstore',$items,$ttl,$_execute);
+        return $this->_set_common('sunionstore',$items,$ttl,$_execute);
     }
 
     public function difference($items,$ttl=30,$_execute=true){
-        return _set_common('sdiffstore',$items,$ttl,$_execute);
+        return $this->_set_common('sdiffstore',$items,$ttl,$_execute);
     }
 
     public function parse($query){
-        $unwatch=[];
+        $unwanted=[];
         $all=[];
         $current=[];
         preg_match_all("/[+-]?[a-z']{2,}/",strtolower($query),$macthArr);
@@ -87,12 +119,13 @@ EOF;
                 $prefix=null;
             }
             $word=trim($word,"'");
-            if(strlen($word)<2 || strpos(array_unique(str_split(self::STOP_WORDS)),$word)!==false){
+            $pregArr=preg_split('/\s+/',self::STOP_WORDS);
+            if(strlen($word)<2 || in_array($word,array_splice($pregArr,1))){
                 continue;
             }
             if($prefix == '-'){
-                $unwatch[]=$word;
-                $unwatch=array_unique($unwatch);
+                $unwanted[]=$word;
+                $unwanted=array_unique($unwanted);
                 continue;
             }
             if($current && !($prefix)){
@@ -105,17 +138,17 @@ EOF;
         if(!empty($current)){
             $all[]=$current;
         }
-        return [$all,$unwatch];
+        return [$all,$unwanted];
     }
 
     public function parse_and_search($query,$ttl=30){
-        list($all,$unwatch)=$this->parse($query);
-        if(!empty($all)){
+        list($all,$unwanted)=$this->parse($query);
+        if(empty($all)){
             return null;
         }
         $to_intersect=[];
         foreach($all as $syn){
-            if(strlen($syn)>1){
+            if(count($syn)>1){
                 array_push($to_intersect,$this->union($syn,$ttl));
             }else{
                 array_push($to_intersect,$syn[0]);
@@ -126,41 +159,41 @@ EOF;
         }else{
             $intersect_result=$to_intersect[0];
         }
-        if(!empty($unwatch)){
-            array_splice($unwatch,0,0,$intersect_result);
-            return $this->difference($unwatch,$ttl);
+        if(!empty($unwanted)){
+            array_splice($unwanted,0,0,$intersect_result);
+            return $this->difference($unwanted,$ttl);
         }
         return $intersect_result;
     }
 
     public function search_and_sort($query,$id=null,$ttl=300,$sort='-updated',$start=0,$num=20){
-        $desc=(bool)(strpos($sort,'-') === 0);
+        $desc=(bool)(strpos($sort,'-') === 0)?'desc':'asc';
         $sort=ltrim($sort,'-');
         $by='kb:doc:*->'.$sort;
-        $alpha=in_array($sort,['update','id','created']);
+        $alpha=!in_array($sort,['update','id','created']);
         if(!empty($id) && Redis::expire($id,$ttl)){
             $id=null;
         }
         if(empty($id)){
             $id=$this->parse_and_search($query,$ttl);
         }
-        $result=Redis::pipeline(function($pipe)use($id,$by,$start,$num){
-            $pipe->scard('ids:'.$id);
-            $pipe->sort('idx:'.$id,['by'=>$by,'sort'=>'desc','limit'=>[$start,$num],'alpha'=>true]);
+        $result=Redis::pipeline(function($pipe)use($id,$by,$desc,$start,$num,$alpha){
+            $pipe->scard('idx:'.$id);
+            $pipe->sort('idx:'.$id,['by'=>$by,'sort'=>$desc,'limit'=>[$start,$num],'alpha'=>$alpha]);
         });
         return [$result[0],$result[1],$id];
     }
 
     public function search_and_zsort($query,$id=null,$ttl=300,$update=1,$vote=0,$start=0,$num=20,$desc=true){
-        if(!empty($id) && !Redis::expire($id,$ttl)){
+        if($id && !Redis::expire($id,$ttl)){
             $id=null;
         }
         if(empty($id)){
             $id=$this->parse_and_search($query,$ttl);
-            $scored_search=['id'=>0,'sort:update'=>$update,'sort:votes'=>$vote];
+            $scored_search=[$id=>0,'sort:update'=>$update,'sort:votes'=>$vote];
             $id=$this->zintersect($scored_search,$ttl);
         }
-        $result=Redis::pipeline(function($pipe)use($id,$start,$num){
+        $result=Redis::pipeline(function($pipe)use($id,$start,$num,$desc){
             $pipe->zcard('idx:'.$id);
             if($desc){
                 $pipe->zrevrange('idx:'.$id,$start,$start+$num-1);
@@ -173,31 +206,56 @@ EOF;
 
     public function _zset_common($method,$scores,$ttl,$params){
         $id=strval($this->uuid());
-        if($params['_execute']){
-            $execute=$params['_execute'];
-            unset($params['_execute']);
+        if($params && in_array('_execute',array_keys($params))){
+            $execute = $params['_execute'];
+            array_splice($params,array_search('_execute',array_keys($params)),1);
         }else{
             $execute=true;
         }
-        Redis::pipeline(function($pipe)use($scores,$method,$id,$params,$ttl){
-            foreach(array_keys($scores) as $key){
-                $scores['idx:'.$key]=array_splice($scores,array_keys($scores,$key)[0],1)[0];
+        foreach(array_keys($scores) as $key){
+            $scores['idx:'.$key]=array_splice($scores,array_search($key,array_keys($scores)),1)[$key];
+        }
+        if($execute){
+            Redis::transaction(function($redis)use($scores,$method,$id,$params,$ttl){
+                $tmpkey=strval($this->uuid());
+                foreach($scores as $v){
+                    $params['weights'][]=$v;
+                }
+                $allparams=['idx:'.$id,count($scores)];
+                foreach(array_keys($scores) as $key){
+                    array_push($allparams,$key);
+                }
+                array_push($allparams,$params);
+                call_user_func_array([$redis,$method],$allparams);
+                $redis->del($tmpkey);
+                $redis->expire('idx:'.$id,$ttl);
+            });
+        }else{
+            $tmpkey=strval($this->uuid());
+            foreach($scores as $v){
+                $params['weights'][]=$v;
             }
-            $pipe->$method('idx:'.$id,$scores,$params);
-            $pipe->expire('idx:'.$id,$ttl);
-        });
+            $allparams=['idx:'.$id,count($scores)];
+            foreach(array_keys($scores) as $key){
+                array_push($allparams,$key);
+            }
+            array_push($allparams,$params);
+            call_user_func_array(['Redis',$method],$allparams);
+            Redis::del($tmpkey);
+            Redis::expire('idx:'.$id,$ttl);
+        }
         return $id;
     }
 
     public function zintersect($items,$ttl,...$params){
-        return $this->_zset_common('zinterstore',$items,$ttl,$params[0] ?: $params);
+        return $this->_zset_common('zinterstore',$items,$ttl,$params[0] ?? $params);
     }
 
     public function zunion($items,$ttl,...$params){
-        return $this->_zset_common('zunionstore',$items,$ttl,$params[0] ?: $params);
+        return $this->_zset_common('zunionstore',$items,$ttl,$params[0] ?? $params);
     }
 
-    public function string_to_score($string,$ignore_case=true){
+    public function string_to_score($string,$ignore_case=false){
         if($ignore_case){
             $string=strtolower($string);
         }
@@ -212,6 +270,7 @@ EOF;
         return $score*2+(strlen($string)>6);
     }
 
+    //广告定位相关函数
     public function cpc_to_ecpm($views,$clicks,$cpc){
         return floatval(1000*$cpc*$clicks/$views);
     }
@@ -224,6 +283,31 @@ EOF;
         return array_pop($args);
     }
 
+    public function createAd(Request $req){
+        $locations=$req->input('locations');
+        $content=$req->input('content');
+        $type=$req->input('type');
+        $value=$req->input('value');
+        $id=mt_rand(11,99).time().mt_rand(11,99);
+        $this->index_ad($id,$locations,$content,$type,$value);
+        return ['success'=>true];
+    }
+
+    public function targetAds(Request $req){
+        $locations=$req->input('locations');
+        $content=$req->input('content');
+        $data=$this->target_ads($locations,$content);
+        return ['ids'=>$data,'success'=>true];
+    }
+
+    public function recordClick(Request $req){
+        $target_id=$req->input('target_id');
+        $ad_id=$req->input('ad_id');
+        $this->record_click($target_id,$ad_id);
+        return ['success'=>true];
+    }
+
+    //广告索引
     public function index_ad($id,$locations,$content,$type,$value){
         Redis::pipeline(function($pipe)use($locations,$id,$content,$type,$value){
             foreach($locations as $location){
@@ -233,7 +317,8 @@ EOF;
             foreach($this->tokenize($content) as $word){
                 $pipe->zadd('idx:'.$word,0,$id);
             }
-            $rvalue=self::TO_ECPM[$type](1000,$AVERAGE_PER_1K[$type] ?: 1,$value);
+            $method=self::TO_ECPM[$type];
+            $rvalue=$this->$method(1000,$AVERAGE_PER_1K[$type] ?? 1,$value);
             $pipe->hset('type:',$id,$type);
             $pipe->zadd('idx:ad:value:',$rvalue,$id);
             $pipe->zadd('ad:base_value:',$value,$id);
@@ -242,38 +327,40 @@ EOF;
     }
 
     public function target_ads($locations,$content){
-        $result=Redis::pipeline(function($pipe)use($locations,$content){
-            list($matched_ads,$base_ecpm)=$this->match_location($locations);
-            list($words,$targeted_ads)=$this->finish_scoring($matched_ads,$base_ecpm,$content);
+        $matchArr=[];
+        $scoreArr=[];
+        $result=Redis::pipeline(function($pipe)use($locations,$content,$matchArr,$scoreArr){
+            array_push($matchArr,...$this->match_location($locations));
+            array_push($scoreArr,...$this->finish_scoring($matchArr[0],$matchArr[1],$content));
             $pipe->incr('ads:served:');
-            $pipe->zrevrange('idx:'.$targeted_ads,0,0); 
+            $pipe->zrevrange('idx:'.$scoreArr[1],0,0); 
         });
         list($target_id,$targeted_ad)=array_slice($result,-2);
         if(empty($targeted_ad)){
             return [null,null];
         }
         $ad_id=$targeted_ad[0];
-        $this->record_targeting_result($target_id,$ad_id,$words);
-        return [$target_id,$ad_id];
+        $this->record_targeting_result($target_id,$ad_id,$scoreArr[0] ?? $scoreArr);
+        return ['target_id'=>$target_id,'ad_id'=>$ad_id];
     }
 
     public function match_location($locations){
         $required=array_map(function($val){return 'req:'.$val;},$locations);
         $matched_ads=$this->union($required,300,false);
-        return [$matched_ads,$this->zintersect(['matched_ads'=>0,'ad:value:'=>1],30,['_execute'=>false])];
+        return [$matched_ads,$this->zintersect([$matched_ads=>0,'ad:value:'=>1],30,['_execute'=>false])];
     }
 
     public function finish_scoring($matched,$base,$content){
         $bonus_ecpm=[];
         $words=$this->tokenize($content);
         foreach($words as $word){
-            $word_bonus=$this->zintersect(['matched'=>0,'word'=>1],30,['_execute'=>false]);
+            $word_bonus=$this->zintersect([$matched=>0,$word=>1],30,['_execute'=>false]);
             $bonus_ecpm[$word_bonus]=1;
         }
         if(!empty($bonus_ecpm)){
-            $minimum=$this->zunion($bonus_ecpm,30,['aggregate'=>'MIN','_execute'=>false]);
-            $maximum=$this->zunion($bonus_ecpm,30,['aggregate'=>'MAX','_execute'=>false]);
-            return [$words,$this->zunion(['base'=>1,'minimum'=>5,'maximum'=>5],30,['_execute'=>false])];
+            $minimum=$this->zunion($bonus_ecpm,30,['aggregate'=>'min','_execute'=>false]);
+            $maximum=$this->zunion($bonus_ecpm,30,['aggregate'=>'max','_execute'=>false]);
+            return [$words,$this->zunion([$base=>1,$minimum=>5,$maximum=>5],30,['_execute'=>false])];
         }
         return [$words,$base];
     }
@@ -290,11 +377,11 @@ EOF;
             }
             $pipe->incr('type:'.$type.':views:');
             foreach($matched as $word){
-                $pipe->zincrby('views:'.$ad_id,$word);
+                $pipe->zincrby('views:'.$ad_id,1,$word);
             }
-            $pipe->zincrby('views:'.$ad_id,'');
+            $pipe->zincrby('views:'.$ad_id,1,'');
         });
-        if(!array_pop($result)%100){
+        if((int)array_pop($result)%100 == 0){
             $this->update_cpms($ad_id);
         }
     }
@@ -303,7 +390,7 @@ EOF;
         $click_key='clicks:'.$ad_id;
         $match_key='terms:matched:'.$target_id;
         $type=Redis::hget('type:',$ad_id);
-        $result=Redis::pipeline(function($pipe)use($target_id,$ad_id,$action,$type,$match_key,$matched,$click_key){
+        Redis::pipeline(function($pipe)use($target_id,$ad_id,$action,$type,$match_key,$click_key){
             if($type == 'cpa'){
                 $pipe->expire($match_key,900);
                 if($action){
@@ -318,7 +405,7 @@ EOF;
             $matched=Redis::smembers($match_key);
             array_push($matched,'');
             foreach($matched as $word){
-                $pipe->zincrby($click_key,$word);
+                $pipe->zincrby($click_key,1,$word);
             }
         });
         $this->update_cpms($ad_id);
@@ -339,7 +426,7 @@ EOF;
 
         $result2=Redis::pipeline(function($pipe)use($type,$which){
             $pipe->get('type:'.$type.':views:');
-            $pipe->get('type:'.$type.$which);
+            $pipe->get('type:'.$type.':'.$which);
         });
         list($type_views,$type_clicks)=$result2;
         $AVERAGE_PER_1K[$type]=floatval(1000*(int)($type_clicks ?: 1)/(int)($type_views ?: 1));
@@ -347,7 +434,7 @@ EOF;
             return;
         }
         $view_key='views:'.$ad_id;
-        $click_key=$which.$ad_id;
+        $click_key=$which.':'.$ad_id;
         $to_ecpm=self::TO_ECPM[$type];
         $result3=Redis::pipeline(function($pipe)use($view_key,$click_key){
             $pipe->zscore($view_key,'');
@@ -357,7 +444,7 @@ EOF;
         if(($ad_clicks ?: 0) < 1){
             $ad_ecpm=Redis::zscore('idx:ad:value',$ad_id);
         }else{
-            $ad_ecpm=$to_ecpm($ad_views ?: 1,$ad_clicks ?: 0,$base_value);
+            $ad_ecpm=$this->$to_ecpm($ad_views ?: 1,$ad_clicks ?: 0,$base_value);
             Redis::zadd('idx:ad:value:',$ad_ecpm,$ad_id);
         }
         foreach($words as $word){
@@ -371,18 +458,39 @@ EOF;
             $word_ecpm=$to_ecpm($views ?: 1,$clicks ?: 0,$base_value);
             $bonus=$word_ecpm - $ad_ecpm;
             Redis::pipeline(function($pipe)use($bonus,$ad_id){
-                $pipe->zadd('idx:.$word',$bonus,$ad_id);
+                $pipe->zadd('idx:'.$word,$bonus,$ad_id);
             });
         }
     }    
 
-
+    //职位搜索相关函数
     public function addJob(Request $req){
         $job_id=$req->input('job_id');
         $required_skills=$req->input('required_skills');
-        $this.add_job($job_id,$required_skills);
+        $this->add_job($job_id,$required_skills);
         $this->index_job($job_id,$required_skills);
         return ['msg'=>'添加工作成功','success'=>true];
+    }
+
+    public function findJobs(Request $req){
+        $skills=$req->input('skills');
+        $data=$this->find_jobs($skills);
+        if($data){
+            return ['list'=>$data,'success'=>true];
+        }else{
+            return ['msg'=>'没有符合的工作','success'=>false];
+        }
+    }
+
+    public function isQualified(Request $req){
+        $job_id=$req->input('job_id');
+        $candidate_skills=$req->input('candidate_skills');
+        $data=$this->is_qualified($job_id,$candidate_skills);
+        if(!$data){
+            return ['success'=>true];
+        }else{
+            return ['skills'=>$data,'success'=>false];
+        }
     }
 
     public function add_job($job_id,$required_skills){
@@ -396,7 +504,7 @@ EOF;
             $pipe->expire($temp,5);
             $pipe->sdiff('job:'.$job_id,$temp);
         });
-        return !array_pop($result);
+        return array_pop($result);
     }
 
     public function index_job($job_id,$skills){
@@ -414,7 +522,7 @@ EOF;
             $skills['skill:'.$skill]=1;
         }
         $job_scores=$this->zunion($skills,30);
-        $final_result=$this->zintersect(['job_scores'=>-1,'jobs:req'=>1],30);
+        $final_result=$this->zintersect([$job_scores=>-1,'jobs:req'=>1],30);
         return Redis::zrangebyscore('idx:'.$final_result,0,0);
     }
 

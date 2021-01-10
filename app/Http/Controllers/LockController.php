@@ -60,10 +60,10 @@ class LockController extends Controller
     public static function acquire_semaphore($semname,$limit,$timeout=10){
         $identifier = strval(self::uuid());
         $now=time();
-        $result=Redis::pipeline(function($pipe)use($semname,$now,$identifier,$timeout){
-            $pipe->zremrangebyscore($semname,'-inf',$now-$timeout);
-            $pipe->zadd($semname,$now,$identifier);
-            $pipe->zrank($semname,$identifier);
+        $result=Redis::transaction(function($redis)use($semname,$now,$identifier,$timeout){
+            $redis->zremrangebyscore($semname,'-inf',$now-$timeout);
+            $redis->zadd($semname,$now,$identifier);
+            $redis->zrank($semname,$identifier);
         });
         if(array_pop($result) < $limit){
             return $identifier;
@@ -81,16 +81,16 @@ class LockController extends Controller
         $czset=$semname.':owner';
         $ctr=$semname.':counter';
         $now=time();
-        $result=Redis::pipeline(function($pipe)use($semname,$now,$timeout,$czset,$ctr){
-            $pipe->zremrangebyscore($semname,'-inf',$now-$timeout);
-            $pipe->zinterstore($czset,1,['czset'=>1,'semname'=>0]);
-            $pipe->incr($ctr);
+        $result=Redis::transaction(function($redis)use($semname,$now,$timeout,$czset,$ctr){
+            $redis->zremrangebyscore($semname,'-inf',$now-$timeout);
+            $redis->zinterstore($czset,2,$czset,$semname,['weights'=>[1,0]]);
+            $redis->incr($ctr);
         });
         $counter=array_pop($result);
-        $result1=Redis::pipeline(function($pipe)use($semname,$now,$timeout,$czset,$counter){
-            $pipe->zadd($semname,$now,$identifier);
-            $pipe->zadd($czset,$counter,$identifier);
-            $pipe->zrank($czset,$identifier);
+        $result1=Redis::transaction(function($redis)use($semname,$now,$timeout,$czset,$counter){
+            $redis->zadd($semname,$now,$identifier);
+            $redis->zadd($czset,$counter,$identifier);
+            $redis->zrank($czset,$identifier);
         });
         if(array_pop($result1) < $limit){
             return $identifier;

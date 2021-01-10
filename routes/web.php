@@ -39,8 +39,11 @@ Route::get('/ipfind', function () {
 Route::get('/contact', function () {
     return view('demo6.contact');
 });
-Route::get('/adtarget', function () {
-    return view('demo7.adtarget');
+Route::get('/chat', function () {
+    return view('demo6.chat');
+});
+Route::get('/docSearch', function () {
+    return view('demo7.docSearch');
 });
 Route::get('/adtarget', function () {
     return view('demo7.adtarget');
@@ -68,6 +71,7 @@ Route::prefix('shop')->group(function(){
 Route::prefix('log')->group(function(){
     Route::post('/getRecentLogList','LogController@getRecentLogList');
     Route::post('/getCommonLogList','LogController@getCommonLogList');
+    Route::post('/logRecent','LogController@logRecent');
 });
 Route::prefix('count')->group(function(){
     Route::post('/getCounter','CountController@getCounter');
@@ -78,9 +82,11 @@ Route::prefix('stats')->group(function(){
     Route::post('/updateStats','CountController@updateStats');
 });
 Route::prefix('ipfind')->group(function(){
-    Route::post('/ipsToRedis','IPfindController@ipsToRedis');
+    // Route::post('/ipsToRedis','IPfindController@ipsToRedis');
     Route::post('/citiesToRedis','IPfindController@citiesToRedis');
     Route::post('/findCity','IPfindController@findCity');
+    Route::get('/getCityList','IPfindController@getCityList');
+    Route::get('/delFile','IPfindController@delFile');
 });
 Route::prefix('contact')->group(function(){
     Route::post('/addUpdateContact','ContactController@addUpdateContact');
@@ -90,8 +96,26 @@ Route::prefix('contact')->group(function(){
     Route::post('/joinGuild','ContactController@joinGuild');
     Route::post('/leaveGuild','ContactController@leaveGuild');
 });
+Route::prefix('chat')->group(function(){
+    Route::get('/getAllChats','ChatController@getAllChats');
+    Route::post('/createChat','ChatController@createChat');
+    Route::post('/fetchPendingMessages','ChatController@fetchPendingMessages');
+    Route::post('/joinChat','ChatController@joinChat');
+    Route::post('/leaveChat','ChatController@leaveChat');
+});
+Route::prefix('docSearch')->group(function(){
+    Route::post('/createDoc','SearchController@createDoc');
+    Route::post('/searchAndSort','SearchController@searchAndSort');
+    Route::post('/searchAndZsort','SearchController@searchAndZsort');
+});
+Route::prefix('adtarget')->group(function(){
+    Route::post('/createAd','SearchController@createAd');
+    Route::post('/targetAds','SearchController@targetAds');
+    Route::post('/recordClick','SearchController@recordClick');
+});
 Route::prefix('job')->group(function(){
     Route::post('/addJob','SearchController@addJob');
+    Route::post('/findJobs','SearchController@findJobs');
 });
 Route::prefix('website')->group(function(){
     Route::get('/getUserList','WebsiteController@getUserList');
