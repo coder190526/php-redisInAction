@@ -30,9 +30,9 @@ Route::get('/log', function () {
 Route::get('/count', function () {
     return view('demo5.count');
 });
-Route::get('/stats', function () {
-    return view('demo5.stats');
-});
+// Route::get('/stats', function () {
+//     return view('demo5.stats');
+// });
 Route::get('/ipfind', function () {
     return view('demo5.ipfind');
 });

@@ -29,9 +29,9 @@
                     <li>
                         <a href="/count">计数器</a>
                     </li>
-                    <li>
+                    {{-- <li>
                         <a href="/stats">统计数据</a>
-                    </li>
+                    </li> --}}
                     <li>
                         <a href="/ipfind">查找ID所属城市</a>
                     </li>
