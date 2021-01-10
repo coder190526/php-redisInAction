@@ -115,6 +115,7 @@
                             }
                         })
                         .catch(err=>{
+                            this.msg='所输入内容与之前的文档索引内容重复，无法生成';
                             console.log(err);
                         })
                     },
